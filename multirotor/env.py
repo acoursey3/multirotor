@@ -26,7 +26,6 @@ class BaseMultirotorEnv(gym.Env):
     motion_reward_scaling = bounding_box / 2
     bonus = bounding_box * 20
 
-
     def __init__(self, vehicle: Multirotor=None, seed: int=None) -> None:
         # pos, vel, att, ang vel
         self.observation_space = gym.spaces.Box(
@@ -77,10 +76,10 @@ class BaseMultirotorEnv(gym.Env):
         """
         if self.vehicle is not None:
             self.vehicle.reset()
-            # position = (self.random.rand(3) - 0.5) * self.bounding_box * 0.75
-            # position[(0<position) & (position<self.proximity)] = self.proximity
-            # position[(-self.proximity<position) & (position<0)] = -self.proximity
-            # self.vehicle.state[:3] = position
+            position = (self.random.rand(3) - 0.5) * self.bounding_box * 0.75
+            position[(0<position) & (position<self.proximity)] = self.proximity
+            position[(-self.proximity<position) & (position<0)] = -self.proximity
+            self.vehicle.state[:3] = position
             if x is not None:
                 self.vehicle.state = np.asarray(x, self.vehicle.dtype)
         # needed by reward() to calculate deviation from straight line
@@ -90,14 +89,11 @@ class BaseMultirotorEnv(gym.Env):
 
     def reward(self, state: np.ndarray, action: np.ndarray, nstate: np.ndarray) -> float:
         dist = np.linalg.norm(nstate[:3])
-
         self._reached = dist <= self.proximity
         self._outofbounds = np.any(np.abs(state[:3]) > self.bounding_box / 2)
         self._outoftime = self.vehicle.t >= self.period
         self._tipped = np.any(np.abs(state[6:9]) > self.max_angle)
-
         self._done = self._outoftime or self._outofbounds or self._reached or self._tipped
-
         delta_pos = (nstate[:3] - state[:3])
         advance = np.linalg.norm(delta_pos)
         cross = np.linalg.norm(np.cross(delta_pos, self._des_unit_vec))
@@ -108,7 +104,7 @@ class BaseMultirotorEnv(gym.Env):
         elif self._tipped or self._outofbounds:
             reward -= self.bonus
         elif self._outoftime:
-            reward -= (dist / self.bounding_box) * self.bonus # modulate by how completed the trajectory is
+            reward -= (dist / self.bounding_box) * self.bonus
         return reward
 
 

@@ -24,7 +24,7 @@ from multirotor.controller import (
 DEFAULTS = Namespace(
     # ntrials = 1000,
     # nprocs = 5,
-    bounding_box = None, # 
+    bounding_box = 20,
     max_velocity = 5,
     max_acceleration = 2.5,
     max_tilt = np.pi/12,
@@ -95,11 +95,8 @@ def run_sim(
     """
     log = DataLog(env.vehicle, ctrl,
                   other_vars=('reward',))
-    oldpos = None 
+        
     for i, (pos, feed_forward_vel) in enumerate(traj):
-        # if oldpos != pos:
-        #     # recalc env.des_posasdasd
-        #     oldpos = pos
         # Get prescribed normalized action for system as thrust and torques
         ref = np.asarray([*pos, 0], env.vehicle.dtype)
         action = ctrl.step(reference=ref, feed_forward_velocity=feed_forward_vel)
@@ -305,33 +302,6 @@ def make_objective(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFA
         return np.mean(errs)
     return objective
 
-# def make_objective(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFAULTS) -> Callable:
-#     """
-#     Make the function that `optuna` will use to optimize.
-
-#     Parameters
-#     ----------
-#     vp : VehicleParams
-#     sp : SimulationParams
-#     args : Namespace, optional
-#         Optimization params, by default DEFAULTS
-#     """
-#     def objective(trial: optuna.Trial):
-#         # objective is to navigate to origin from an intial position
-#         ctrl_params = make_controller_from_trial(trial=trial, args=args)
-#         env = make_env(vp, sp, args)
-#         ctrl = get_controller(env.vehicle, args.scurve, args)
-#         ctrl.set_params(**ctrl_params)
-#         errs = []
-#         for i in range(args.num_sims):
-#             env.reset([args.initial_position[0], args.initial_position[1], args.initial_position[2]] + [0] * 9)
-#             ctrl.reset()
-#             waypoints = args.wp
-#             traj = Trajectory(env.vehicle, waypoints)
-#             log = run_sim(env, traj, ctrl)
-#             errs.append(log.reward.sum())
-#         return np.mean(errs)
-#     return objective
 
 def optimize(
     vp: VehicleParams, sp: SimulationParams,
