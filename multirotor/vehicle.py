@@ -144,3 +144,5 @@ class SimulationParams:
     "Air density kg/m^3 at MSL"
     dtype: type = None
     "Default data type for arrays. If None, inferred from VehicleParams inertia_matrix."
+    initial_position: list = (0, 0, 0)
+    """Initial position of the simulation as a tuple of (x, y, z) coordinates. By default (0,0,0)."""

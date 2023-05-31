@@ -2,7 +2,7 @@ from typing import Callable, List, Tuple
 from copy import deepcopy
 
 import numpy as np
-from scipy.integrate import odeint, trapezoid
+from scipy.integrate import odeint, trapezoid, simps
 
 from .vehicle import MotorParams, PropellerParams, SimulationParams, VehicleParams, BatteryParams
 from .coords import body_to_inertial, direction_cosine_matrix, rotating_frame_derivative, angular_to_euler_rate
@@ -265,6 +265,7 @@ class Multirotor:
         self.state: np.ndarray = None
         self.t: float = 0.
         self._dxdt = None
+        self._prev_dxdt = None
         self.dxdt_decimals = max(1, 1 - int(np.log10(self.simulation.dt)))
 
         self.propellers: List[Propeller] = []
@@ -302,7 +303,11 @@ class Multirotor:
         self.params.propeller_vectors = self.params.propeller_vectors.astype(self.dtype)
         self.params.inertia_matrix = self.params.inertia_matrix.astype(self.dtype)
         self.params.inertia_matrix_inverse = self.params.inertia_matrix_inverse.astype(self.dtype)
-        self.state = np.zeros(12, dtype=self.dtype)
+
+        zeros_array = np.zeros(9, dtype=self.dtype)
+        initial_position = np.array(self.simulation.initial_position, dtype=self.dtype)
+        self.state = np.concatenate([initial_position, zeros_array])
+        
         self._dxdt = np.zeros_like(self.state)
         return self.state
 
@@ -566,11 +571,18 @@ class Multirotor:
             args=(u, disturb_forces, disturb_torques),
             rtol=1e-4, atol=1e-4, tfirst=True
         )[-1]
+
+        # if self._prev_dxdt is None:
+        #     self._prev_dxdt = np.zeros_like(self._dxdt)
+
+        # self.state = self.state + simps([self._prev_dxdt, self._dxdt], dx=self.simulation.dt, axis=0)
         self.state = np.around(self.state, 4).astype(self.dtype)
         # print('post-x', self.t // self.simulation.dt, self.state.dtype)
         for u_, prop in zip(u, self.propellers):
             prop.step(u_, max_voltage=self.battery.voltage)
         self.battery.step()
+
+        self._prev_dxdt = self._dxdt
         return self.state
 
 
