@@ -11,7 +11,7 @@ from multirotor.simulation import Multirotor
 from multirotor.trajectories import Trajectory
 from multirotor.vehicle import VehicleParams, SimulationParams
 from multirotor.helpers import DataLog
-from multirotor.env import DynamicsMultirotorEnv
+from multirotor.env import DynamicsMultirotorEnv, TrajectoryDynamicsEnvironment
 from multirotor.controller import (
     AltController, AltRateController,
     PosController, AttController,
@@ -24,14 +24,14 @@ from multirotor.controller import (
 DEFAULTS = Namespace(
     # ntrials = 1000,
     # nprocs = 5,
-    bounding_box = 20,
+    bounding_box = 300,
     max_velocity = 5,
     max_acceleration = 2.5,
     max_tilt = np.pi/12,
     leashing = True,
     sqrt_scaling = True,
     use_yaw = True,
-    num_sims = 10,
+    num_sims = 1,
     scurve = False,
     max_err_i_attitude = 0.1,
     max_err_i_rate = 0.1,
@@ -72,7 +72,7 @@ def get_study(study_name: str=None, seed: int=0) -> optuna.Study:
 
 
 def run_sim(
-    env, traj: Trajectory,
+    env: TrajectoryDynamicsEnvironment, traj: Trajectory,
     ctrl: Controller
 ) -> DataLog:
     """
@@ -97,12 +97,13 @@ def run_sim(
                   other_vars=('reward',))
         
     for i, (pos, feed_forward_vel) in enumerate(traj):
+        
         # Get prescribed normalized action for system as thrust and torques
         ref = np.asarray([*pos, 0], env.vehicle.dtype)
         action = ctrl.step(reference=ref, feed_forward_velocity=feed_forward_vel)
         # Send speeds to environment
         dynamics = np.asarray([0,0,*action], env.vehicle.dtype) # (Fx, Fy, Fz, Tx, Ty, Tz)
-        state, r, done, *_ = env.step(dynamics)
+        state, r, done, *_ = env.step(dynamics, next_pos=pos, final_pos=DEFAULTS.wp[-1])
         log.log(reward=r)
         if done:
             break
@@ -252,7 +253,7 @@ def make_controller_from_trial(trial: optuna.Trial, args: Namespace=DEFAULTS, pr
 
 
 
-def make_env(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFAULTS) -> DynamicsMultirotorEnv:
+def make_env(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFAULTS) -> TrajectoryDynamicsEnvironment:
     """
     Make the environment instance to be used by `objective()`, and set default
     env parameters.
@@ -268,7 +269,7 @@ def make_env(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFAULTS) 
     -------
     DynamicsMultirotorEnv
     """
-    env = DynamicsMultirotorEnv(Multirotor(vp, sp), allocate=True)
+    env = TrajectoryDynamicsEnvironment(Multirotor(vp, sp), allocate=True)
     env.bounding_box = args.bounding_box
     return env
 
@@ -295,8 +296,8 @@ def make_objective(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFA
         for i in range(args.num_sims):
             env.reset()
             ctrl.reset()
-            waypoints = np.asarray([[0,0,0]])
-            traj = Trajectory(env.vehicle, waypoints, proximity=0.1)
+            waypoints = args.wp
+            traj = Trajectory(env.vehicle, waypoints, proximity=2)
             log = run_sim(env, traj, ctrl)
             errs.append(log.reward.sum())
         return np.mean(errs)

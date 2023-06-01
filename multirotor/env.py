@@ -17,14 +17,14 @@ class BaseMultirotorEnv(gym.Env):
 
     max_angle = np.pi/12
     """The max tilt angle in radians."""
-    proximity = 0.5
+    proximity = 2
     """Distance from the waypoint at which to consider it has been reached."""
-    period = 10
+    period = 900
     """Maximum duration of the episode (seconds)."""
-    bounding_box = 20
+    bounding_box = 300
     """Size of the cube in which the vehicle can fly, centered at origin."""
     motion_reward_scaling = bounding_box / 2
-    bonus = bounding_box * 20
+    bonus = bounding_box * 1000
 
     def __init__(self, vehicle: Multirotor=None, seed: int=None) -> None:
         # pos, vel, att, ang vel
@@ -143,6 +143,7 @@ class DynamicsMultirotorEnv(BaseMultirotorEnv):
         self.allocate = allocate
         self.max_rads = max_rads
 
+    
 
     def step(
         self, action: np.ndarray, disturb_forces: np.ndarray=0.,
@@ -176,7 +177,7 @@ class DynamicsMultirotorEnv(BaseMultirotorEnv):
         nstate = self.vehicle.step_dynamics(u=action)
         reward = self.reward(state, action, nstate)
         return nstate, reward, self._done, {}
-
+    
 
 
 class SpeedsMultirotorEnv(BaseMultirotorEnv):
@@ -247,3 +248,106 @@ class SpeedsMultirotorEnv(BaseMultirotorEnv):
         )
         reward = self.reward(state, action, nstate)
         return nstate, reward, self._done, {}
+    
+class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
+
+    def step(
+        self, action: np.ndarray, disturb_forces: np.ndarray=0.,
+        disturb_torques: np.ndarray=0., next_pos: np.ndarray=np.zeros(3), final_pos: np.ndarray=np.zeros(3)
+    ) -> Tuple[np.ndarray, float, bool, dict]:
+        """
+        Step environment by providing dynamics acting in local frame.
+
+        Parameters
+        ----------
+        action : np.ndarray
+            An array of x,y,z forces and x,y,z torques in local frame.
+        disturb_forces : np.ndarray, optional
+            Disturbinng x,y,z forces in the vehicle's local frame, by default 0.
+        disturb_torques : np.ndarray, optional
+            Disturbing x,y,z torques in the vehicle's local frame, by default 0.
+
+        Returns
+        -------
+        Tuple[np.ndarray, float, bool, dict]
+            The state and other environment variables.
+        """
+        if self.allocate:
+            speeds = self.vehicle.allocate_control(action[2], action[3:6])
+            speeds = np.clip(speeds, a_min=0, a_max=self.max_rads)
+            forces, torques = self.vehicle.get_forces_torques(speeds, self.vehicle.state)
+            action = np.concatenate((forces, torques))
+        action[:3] += disturb_forces
+        action[3:] += disturb_torques
+        state = self.state
+        nstate = self.vehicle.step_dynamics(u=action)
+        reward = self.reward(state, action, nstate, next_pos, final_pos)
+        return nstate, reward, self._done, {}
+    
+    def reset(self, initial_position: np.ndarray=None) -> np.ndarray:
+        """
+        Reset the vehicle to a fixed initial position.
+
+        Parameters
+        ----------
+        initial_position : np.ndarray, optional
+            A state to set the vehicle to, by default None
+
+        Returns
+        -------
+        np.ndarray
+            The state vector of the vehicle.
+        """
+        if self.vehicle is not None:
+            self.vehicle.reset()
+            if initial_position is not None:
+                self.vehicle.state = np.asarray(initial_position, self.vehicle.dtype)
+        # needed by reward() to calculate deviation from straight line - TODO: change this
+        self._des_unit_vec = - self.state[:3] / np.linalg.norm(self.state[:3])
+        return self.state
+
+    def reward(self, state: np.ndarray, action: np.ndarray, nstate: np.ndarray, next_pos: np.ndarray, final_pos: np.ndarray) -> float:
+        prev_dist = np.linalg.norm(next_pos - state[:3])
+        dist = np.linalg.norm(next_pos - nstate[:3])
+        progression = prev_dist - dist 
+
+        self._outofbounds = np.any(np.abs(state[:3]) > self.bounding_box / 2)
+        self._outoftime = self.vehicle.t >= self.period
+        self._tipped = np.any(np.abs(state[6:9]) > self.max_angle)
+        self._reached = dist <= self.proximity
+        self._crashed = state[2] <= 0
+
+        if np.array_equal(next_pos, final_pos):
+            self._completed = np.linalg.norm(final_pos - state[:3]) <= self.proximity
+        else:
+            self._completed = False
+
+        self._done = self._outoftime or self._outofbounds or self._tipped or self._crashed or self._completed
+
+
+
+        delta_pos = (nstate[:3] - state[:3])
+        advance = np.linalg.norm(delta_pos)
+        cross = np.linalg.norm(np.cross(delta_pos, (next_pos - state[:3])/dist))
+        delta_turn = np.abs(nstate[8]) - np.abs(state[8])
+        # reward = ((-dist - cross - delta_turn) * self.motion_reward_scaling) - self.vehicle.simulation.dt # cross
+        # print(f"Advance: {advance}")
+        # print(f"cross:{cross}")
+        # print(f"reward:{reward}")
+
+        reward = (progression - cross - delta_turn) * self.motion_reward_scaling - self.vehicle.simulation.dt 
+
+        if self._reached:
+            reward += self.bonus
+            print("Reached")
+        elif self._completed:
+            reward += self.bonus * 4
+            print("Completed")
+        elif self._tipped or self._outofbounds or self._crashed:
+            reward -= self.bonus
+            if self._tipped: print("Tipped")
+            if self._outofbounds: print("oob")
+        elif self._outoftime:
+            if self._outoftime: print("OOT")
+            reward -= (dist / self.bounding_box) * self.bonus
+        return reward
