@@ -324,8 +324,6 @@ class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
 
         self._done = self._outoftime or self._outofbounds or self._tipped or self._crashed or self._completed
 
-
-
         delta_pos = (nstate[:3] - state[:3])
         advance = np.linalg.norm(delta_pos)
         cross = np.linalg.norm(np.cross(delta_pos, (next_pos - state[:3])/dist))
@@ -339,15 +337,15 @@ class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
 
         if self._reached:
             reward += self.bonus
-            print("Reached")
+            # print("Reached")
         elif self._completed:
             reward += self.bonus * 4
             print("Completed")
         elif self._tipped or self._outofbounds or self._crashed:
             reward -= self.bonus
-            if self._tipped: print("Tipped")
-            if self._outofbounds: print("oob")
+            # if self._tipped: print("Tipped")
+            # if self._outofbounds: print("oob")
         elif self._outoftime:
-            if self._outoftime: print("OOT")
+            # if self._outoftime: print("OOT")
             reward -= (dist / self.bounding_box) * self.bonus
         return reward
