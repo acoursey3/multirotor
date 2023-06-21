@@ -19,12 +19,12 @@ class BaseMultirotorEnv(gym.Env):
     """The max tilt angle in radians."""
     proximity = 2
     """Distance from the waypoint at which to consider it has been reached."""
-    period = 900
+    period = 600
     """Maximum duration of the episode (seconds)."""
-    bounding_box = 300
+    bounding_box = 1000 # larger
     """Size of the cube in which the vehicle can fly, centered at origin."""
     motion_reward_scaling = bounding_box / 2
-    bonus = bounding_box * 1000
+    bonus = bounding_box 
 
     def __init__(self, vehicle: Multirotor=None, seed: int=None) -> None:
         # pos, vel, att, ang vel
@@ -251,6 +251,8 @@ class SpeedsMultirotorEnv(BaseMultirotorEnv):
     
 class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
 
+    # max_angle = np.pi/3
+
     def step(
         self, action: np.ndarray, disturb_forces: np.ndarray=0.,
         disturb_torques: np.ndarray=0., next_pos: np.ndarray=np.zeros(3), final_pos: np.ndarray=np.zeros(3)
@@ -311,7 +313,7 @@ class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
         dist = np.linalg.norm(next_pos - nstate[:3])
         progression = prev_dist - dist 
 
-        self._outofbounds = np.any(np.abs(state[:3]) > self.bounding_box / 2)
+        # self._outofbounds = np.any(np.abs(state[:3]) > self.bounding_box / 2)
         self._outoftime = self.vehicle.t >= self.period
         self._tipped = np.any(np.abs(state[6:9]) > self.max_angle)
         self._reached = dist <= self.proximity
@@ -322,30 +324,31 @@ class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
         else:
             self._completed = False
 
-        self._done = self._outoftime or self._outofbounds or self._tipped or self._crashed or self._completed
+        self._done = self._outoftime or self._tipped or self._crashed or self._completed
 
         delta_pos = (nstate[:3] - state[:3])
-        advance = np.linalg.norm(delta_pos)
         cross = np.linalg.norm(np.cross(delta_pos, (next_pos - state[:3])/dist))
         delta_turn = np.abs(nstate[8]) - np.abs(state[8])
         # reward = ((-dist - cross - delta_turn) * self.motion_reward_scaling) - self.vehicle.simulation.dt # cross
         # print(f"Advance: {advance}")
         # print(f"cross:{cross}")
-        # print(f"reward:{reward}")
 
+        # reward = (progression - cross - delta_turn) * self.motion_reward_scaling - self.vehicle.simulation.dt 
         reward = (progression - cross - delta_turn) * self.motion_reward_scaling - self.vehicle.simulation.dt 
 
         if self._reached:
-            reward += self.bonus
+            reward += self.bonus * 1000
             # print("Reached")
         elif self._completed:
-            reward += self.bonus * 4
+            reward += self.bonus * 4000
             print("Completed")
-        elif self._tipped or self._outofbounds or self._crashed:
-            reward -= self.bonus
+        elif self._tipped:
+            reward -= self.bonus * 500
             # if self._tipped: print("Tipped")
             # if self._outofbounds: print("oob")
+        elif self._crashed:
+            reward -= self.bonus * 1000
         elif self._outoftime:
             # if self._outoftime: print("OOT")
-            reward -= (dist / self.bounding_box) * self.bonus
+            reward -= self.bonus * 100 / dist
         return reward

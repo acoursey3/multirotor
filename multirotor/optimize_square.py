@@ -7,12 +7,12 @@ import pickle
 
 import numpy as np
 import optuna
-from multirotor.simulation import Multirotor
-from multirotor.trajectories import Trajectory
-from multirotor.vehicle import VehicleParams, SimulationParams
-from multirotor.helpers import DataLog
-from multirotor.env import DynamicsMultirotorEnv, TrajectoryDynamicsEnvironment
-from multirotor.controller import (
+from .simulation import Multirotor
+from .trajectories import Trajectory
+from .vehicle import VehicleParams, SimulationParams
+from .helpers import DataLog
+from .env import DynamicsMultirotorEnv
+from .controller import (
     AltController, AltRateController,
     PosController, AttController,
     VelController, RateController,
@@ -22,31 +22,17 @@ from multirotor.controller import (
 
 
 DEFAULTS = Namespace(
-    # ntrials = 1000,
-    # nprocs = 5,
-    bounding_box = 1000,
-    max_velocity = 15,
-    max_acceleration = 3,
+    bounding_box = 20,
+    max_velocity = 5,
+    max_acceleration = 2.5,
     max_tilt = np.pi/12,
     leashing = True,
     sqrt_scaling = True,
     use_yaw = True,
-    num_sims = 1,
+    num_sims = 10,
     scurve = False,
     max_err_i_attitude = 0.1,
     max_err_i_rate = 0.1,
-    initial_position = (0,0,35.41),
-    wp = np.asarray([ # initial: (0,0,35.41), this is a rectangular trajectory
-       [   2.37496268,  164.03247122,   35.41      ],
-       [ 113.96492466,  164.03247122,   35.41      ],
-       [ 167.61245764,  124.92886525,   35.41      ],
-       [ 167.61245764, -189.79338281,   45.41      ],
-       [ 103.51064796, -193.60685109,   45.41      ],
-       [ 102.56732151,  114.43960518,   35.41      ],
-       [  28.48845482,  114.43960518,   35.41      ],
-       [  32.29505406,  -21.93855411,   35.41      ],
-       [  25.46980956,  -17.24505469,   35.41      ]
-    ])
 )
 
 def get_study(study_name: str=None, seed: int=0) -> optuna.Study:
@@ -77,12 +63,12 @@ def get_study(study_name: str=None, seed: int=0) -> optuna.Study:
 
 
 def run_sim(
-    env: TrajectoryDynamicsEnvironment, traj: Trajectory,
+    env, traj: Trajectory,
     ctrl: Controller
 ) -> DataLog:
     """
     Run a single episode, where the environment is controlled by the `Controller`
-    object.
+    object. The `env` object must be `reset()` before calling.
 
     Parameters
     ----------
@@ -101,21 +87,17 @@ def run_sim(
     log = DataLog(env.vehicle, ctrl,
                   other_vars=('reward',))
         
-    # rewards = []
     for i, (pos, feed_forward_vel) in enumerate(traj):
-        
         # Get prescribed normalized action for system as thrust and torques
         ref = np.asarray([*pos, 0], env.vehicle.dtype)
         action = ctrl.step(reference=ref, feed_forward_velocity=feed_forward_vel)
         # Send speeds to environment
         dynamics = np.asarray([0,0,*action], env.vehicle.dtype) # (Fx, Fy, Fz, Tx, Ty, Tz)
-        state, r, done, *_ = env.step(dynamics, next_pos=pos, final_pos=DEFAULTS.wp[-1])
-        # rewards.append(r)
+        state, r, done, *_ = env.step(dynamics)
         log.log(reward=r)
         if done:
             break
 
-    # print(np.sum(rewards))
     log.done_logging()
     return log
 
@@ -244,16 +226,16 @@ def make_controller_from_trial(trial: optuna.Trial, args: Namespace=DEFAULTS, pr
             max_acceleration = np.asarray((r_pitch_roll_max_acc, r_pitch_roll_max_acc, r_yaw_max_acc)),
             max_err_i = np.asarray((r_pitch_roll_max_acc, r_pitch_roll_max_acc, r_yaw_max_acc)),
         ),
-        # ctrl_z = dict(
-        #     k_p = trial.suggest_float('z.k_p', 0.1, 50),
-        #     k_i = trial.suggest_float('z.k_i', 0.1, 10),
-        #     k_d = trial.suggest_float('z.k_d', 1, 250),
-        # ),
-        # ctrl_vz = dict(
-        #     k_p = trial.suggest_float('vz.k_p', 0.1, 50),
-        #     k_i = trial.suggest_float('vz.k_i', 0.1, 10),
-        #     k_d = trial.suggest_float('vz.k_d', 1, 250),
-        # ),
+        ctrl_z = dict(
+            k_p = trial.suggest_float('z.k_p', 0.1, 50),
+            k_i = trial.suggest_float('z.k_i', 0.1, 10),
+            k_d = trial.suggest_float('z.k_d', 1, 250),
+        ),
+        ctrl_vz = dict(
+            k_p = trial.suggest_float('vz.k_p', 0.1, 50),
+            k_i = trial.suggest_float('vz.k_i', 0.1, 10),
+            k_d = trial.suggest_float('vz.k_d', 1, 250),
+        ),
     )
     if args.scurve:
         params.update({prefix + 'feedforward_weight': trial.suggest_float(prefix + 'feedforward_weight', 0.1, 1.0, step=0.1)})
@@ -261,7 +243,7 @@ def make_controller_from_trial(trial: optuna.Trial, args: Namespace=DEFAULTS, pr
 
 
 
-def make_env(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFAULTS) -> TrajectoryDynamicsEnvironment:
+def make_env(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFAULTS) -> DynamicsMultirotorEnv:
     """
     Make the environment instance to be used by `objective()`, and set default
     env parameters.
@@ -277,7 +259,7 @@ def make_env(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFAULTS) 
     -------
     DynamicsMultirotorEnv
     """
-    env = TrajectoryDynamicsEnvironment(Multirotor(vp, sp), allocate=True)
+    env = DynamicsMultirotorEnv(Multirotor(vp, sp), allocate=True)
     env.bounding_box = args.bounding_box
     return env
 
@@ -304,12 +286,13 @@ def make_objective(vp: VehicleParams, sp: SimulationParams, args: Namespace=DEFA
         for i in range(args.num_sims):
             env.reset()
             ctrl.reset()
-            waypoints = args.wp
-            traj = Trajectory(env.vehicle, waypoints, proximity=2)
+            waypoints = np.asarray([[0,0,0]])
+            traj = Trajectory(env.vehicle, waypoints, proximity=0.1)
             log = run_sim(env, traj, ctrl)
             errs.append(log.reward.sum())
         return np.mean(errs)
     return objective
+
 
 
 def optimize(
