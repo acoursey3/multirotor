@@ -201,7 +201,7 @@ class SpeedsMultirotorEnv(BaseMultirotorEnv):
     """
 
 
-    def __init__(self, vehicle: Multirotor) -> None:
+    def __init__(self, vehicle: Multirotor, max_time: int=1200) -> None:
         """
 
         Parameters
@@ -210,6 +210,7 @@ class SpeedsMultirotorEnv(BaseMultirotorEnv):
             The `Multirotor` vehicle to use as the environment
         """
         super().__init__(vehicle=vehicle)
+        self.period=max_time
         
         self.action_space = gym.spaces.Box(
             low=-np.inf,
@@ -250,8 +251,6 @@ class SpeedsMultirotorEnv(BaseMultirotorEnv):
         return nstate, reward, self._done, {}
     
 class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
-
-    # max_angle = np.pi/3
 
     def step(
         self, action: np.ndarray, disturb_forces: np.ndarray=0.,
@@ -352,3 +351,4 @@ class TrajectoryDynamicsEnvironment(DynamicsMultirotorEnv):
             # if self._outoftime: print("OOT")
             reward -= self.bonus * 100 / dist
         return reward
+    
