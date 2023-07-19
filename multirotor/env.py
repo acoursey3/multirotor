@@ -241,6 +241,8 @@ class SpeedsMultirotorEnv(BaseMultirotorEnv):
         Tuple[np.ndarray, float, bool, dict]
             The state and other environment variables.
         """
+        
+        action = np.clip(action, a_min=0, a_max=600)
         state = self.state
         nstate = self.vehicle.step_speeds(
             u=action,

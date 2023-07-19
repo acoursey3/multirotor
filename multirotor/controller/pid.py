@@ -610,14 +610,25 @@ class Controller:
         if self.n % self.steps_z == 0:
             dt = self.steps_z * self.vehicle.simulation.dt
             ref_vel_z = self.ctrl_z.step(ref_z, self.vehicle.position[2:], dt=dt, persist=persist)
-            self.thrust = self.ctrl_vz.step(ref_vel_z, self.vehicle.inertial_velocity[2:], dt=dt, persist=persist)
 
         if self.n % self.steps_p == 0:
             dt = self.steps_p * self.vehicle.simulation.dt
             self._pid_vel = self._ref_vel = self.ctrl_p.step(ref_xy, self.vehicle.position[:2], dt=dt, persist=persist)
             if feed_forward_velocity is not None:
-                self._ref_vel = (self.feedforward_weight * feed_forward_velocity[:2]) + (1 - self.feedforward_weight) * self._pid_vel
-            self._ref_vel = np.clip(self._ref_vel, -self.ctrl_p.max_velocity, self.ctrl_p.max_velocity)
+                self._ref_vel = (self.feedforward_weight * feed_forward_velocity[:2]) + (1 - self.feedforward_weight) * self._pid_vel      
+
+        # Limits the norm of the reference velocities to the max velocity
+        if self.n % self.steps_z == 0 or self.n % self.steps_p == 0:
+            ref_vels = np.array([self._ref_vel[0], self._ref_vel[1], ref_vel_z[0]])
+            size_ref = np.linalg.norm(ref_vels)
+            if size_ref > self.ctrl_p.max_velocity:
+                ref_vels = ref_vels / size_ref * self.ctrl_p.max_velocity
+
+            self._ref_vel[0:1] = ref_vels[0:1]
+            ref_vel_z[0] = ref_vels[2]
+
+        if self.n % self.steps_z == 0:
+            self.thrust = self.ctrl_vz.step(ref_vel_z, self.vehicle.inertial_velocity[2:], dt=dt, persist=persist)
         
         if self.n % self.steps_a == 0:
             dt = self.steps_a * self.vehicle.simulation.dt

@@ -2,7 +2,7 @@ from typing import Callable, List, Tuple
 from copy import deepcopy
 
 import numpy as np
-from scipy.integrate import odeint, trapezoid, simps
+from scipy.integrate import odeint, trapezoid, simps, romberg
 
 from .vehicle import MotorParams, PropellerParams, SimulationParams, VehicleParams, BatteryParams
 from .coords import body_to_inertial, direction_cosine_matrix, rotating_frame_derivative, angular_to_euler_rate
@@ -267,6 +267,8 @@ class Multirotor:
         self._dxdt = None
         self._prev_dxdt = None
         self.dxdt_decimals = max(1, 1 - int(np.log10(self.simulation.dt)))
+
+        self.dxdts = []
 
         self.propellers: List[Propeller] = []
         for params in self.params.propellers:
@@ -566,23 +568,29 @@ class Multirotor:
             disturb_forces=disturb_forces, disturb_torques=disturb_torques
         )
         # print('pre-x', self.t // self.simulation.dt, self.state.dtype)
-        self.state = odeint(
-            self.dxdt_speeds, self.state, (0, self.simulation.dt),
-            args=(u, disturb_forces, disturb_torques),
-            rtol=1e-4, atol=1e-4, tfirst=True
-        )[-1]
-
-        # if self._prev_dxdt is None:
-        #     self._prev_dxdt = np.zeros_like(self._dxdt)
-
-        # self.state = self.state + simps([self._prev_dxdt, self._dxdt], dx=self.simulation.dt, axis=0)
+        
+        use_ode = True
+        self.dxdts.append(self._dxdt)
+        
+        if use_ode:
+            self.state = odeint(
+                self.dxdt_speeds, self.state, (0, self.simulation.dt),
+                args=(u, disturb_forces, disturb_torques),
+                rtol=1e-4, atol=1e-4, tfirst=True
+            )[-1]
+        else:
+            if self._prev_dxdt is None:
+                self._prev_dxdt = np.zeros_like(self._dxdt)
+                
+            self.state = self.state + simps([self._prev_dxdt, self._dxdt], dx=self.simulation.dt, axis=0)
+                
         self.state = np.around(self.state, 4).astype(self.dtype)
         # print('post-x', self.t // self.simulation.dt, self.state.dtype)
         for u_, prop in zip(u, self.propellers):
             prop.step(u_, max_voltage=self.battery.voltage)
         self.battery.step()
 
-        self._prev_dxdt = self._dxdt
+        self._prev_dxdt = self._dxdt.copy()
         return self.state
 
 
