@@ -27,7 +27,7 @@ def body_to_inertial(vector: np.ndarray, dcm: np.ndarray) -> np.ndarray:
 
 
 @njit
-def inertial_to_body(vector: np.ndarray, dcm=np.ndarray) -> np.ndarray:
+def inertial_to_body(vector: np.ndarray, dcm: np.ndarray) -> np.ndarray:
     return dcm @ vector
 
 

@@ -6,7 +6,7 @@ from scipy.integrate import trapezoid
 from numba import njit
 
 from ..simulation import Multirotor
-from ..coords import euler_to_angular_rate
+from ..coords import body_to_inertial, inertial_to_body, direction_cosine_matrix, euler_to_angular_rate
 
 # See more:
 # https://archive.ph/3Aco3
@@ -248,6 +248,7 @@ class PosController(PIDController):
         ref_velocity_mag = np.linalg.norm(ref_velocity)
         ref_velocity_unit = ref_velocity / (ref_velocity_mag + 1e-6)
         action = ref_velocity_unit * min(ref_velocity_mag, self.max_velocity)
+        # action = velocity
         if persist:
             self.action = action
         return action
@@ -443,10 +444,11 @@ class AltRateController(PIDController):
             # change in velocity i.e. acceleration
             ctrl = super().step(reference=reference, measurement=measurement, dt=dt, persist=persist)
             # convert acceleration to required z-force, given orientation
-            action = self.vehicle.params.mass * (
-                    ctrl / (np.cos(roll) * np.cos(pitch))
-                ) + \
-                self.vehicle.weight
+            # action = self.vehicle.params.mass * (
+            #         ctrl / (np.cos(roll) * np.cos(pitch))
+            #     ) + \
+            #     self.vehicle.weight
+            action = ctrl + self.vehicle.weight #(add constant)
             if persist:
                 self.action = action
             return action # thrust force
@@ -615,16 +617,22 @@ class Controller:
             dt = self.steps_p * self.vehicle.simulation.dt
             self._pid_vel = self._ref_vel = self.ctrl_p.step(ref_xy, self.vehicle.position[:2], dt=dt, persist=persist)
             if feed_forward_velocity is not None:
-                self._ref_vel = (self.feedforward_weight * feed_forward_velocity[:2]) + (1 - self.feedforward_weight) * self._pid_vel      
+                self._ref_vel = (self.feedforward_weight * feed_forward_velocity[:2]) + (1 - self.feedforward_weight) * self._pid_vel # this is broken    
 
         # Limits the norm of the reference velocities to the max velocity
         if self.n % self.steps_z == 0 or self.n % self.steps_p == 0:
-            ref_vels = np.array([self._ref_vel[0], self._ref_vel[1], ref_vel_z[0]])
+            # dcm = direction_cosine_matrix(*self.vehicle.orientation)
+            # dcm = np.array(dcm, dtype=np.float64)
+            ref_vels = np.array([self._ref_vel[0], self._ref_vel[1], ref_vel_z[0]], dtype=np.float64)
+            # body_ref_vel = inertial_to_body(ref_vels, dcm)
+            # ref_vels = body_ref_vel.copy()
             size_ref = np.linalg.norm(ref_vels)
             if size_ref > self.ctrl_p.max_velocity:
-                ref_vels = ref_vels / size_ref * self.ctrl_p.max_velocity
+                ref_vels = (ref_vels / size_ref) * self.ctrl_p.max_velocity
 
             self._ref_vel[0:1] = ref_vels[0:1]
+
+            # inertial_ref_vel = body_to_inertial(ref_vels, dcm)
             ref_vel_z[0] = ref_vels[2]
 
         if self.n % self.steps_z == 0:
@@ -633,7 +641,7 @@ class Controller:
         if self.n % self.steps_a == 0:
             dt = self.steps_a * self.vehicle.simulation.dt
             self._pitch_roll = self.ctrl_v.step(self._ref_vel, self.vehicle.velocity[:2], dt=dt, persist=persist)
-            ref_orientation = np.asarray([self._pitch_roll[1], self._pitch_roll[0], ref_yaw])
+            ref_orientation = np.clip(np.asarray([self._pitch_roll[1], self._pitch_roll[0], ref_yaw]), -0.3926991, 0.3926991) # added clipping here
             ref_rate = self.ctrl_a.step(ref_orientation, self.vehicle.orientation, dt=dt)
             self.torques = self.ctrl_r.step(ref_rate, self.vehicle.euler_rate, dt=dt, persist=persist)
 
